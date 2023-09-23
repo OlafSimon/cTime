@@ -1,0 +1,9 @@
+/** \mainpage C++ class representing time
+
+This manual introduces the class 'LibCpp::cTime' encapsulating the C++ 'time.h' functions.\n
+\ref LibCpp_time
+
+\defgroup LibCpp_time time
+\brief Group for time handling.
+
+**/
