@@ -4,8 +4,10 @@ CONFIG -= app_bundle
 CONFIG -= qt
 
 SOURCES += \
-        main.cpp \
-        src/cTimeStd.cpp \
+    src/LibOb/CommonCpp/LibOb_strptime.c \
+    src/main.cpp \
+    src/LibCpp/Time/cTimeStd.cpp \
 
 HEADERS += \
-    src/cTime.h \
+    src/LibCpp/Time/cTime.h \
+    src/LibOb/CommonCpp/LibOb_strptime.h

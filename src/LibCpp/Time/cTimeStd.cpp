@@ -29,7 +29,70 @@
  *
  * \class LibCpp::cTime
  *
- * Published under MIT License (see cTimeStd.cpp)
+ * Published under MIT License
+ *
+ * \section SECTION_TIME_DESIGN Designed features
+ *
+ * \subsection SECTION_TIME_MATH Direct mathematical operations with integrated  'timespan' functionality
+ *
+ * \code
+ * cTime time = cTime::now();
+ * cTime span = cTime::set(1, 2, 0, 0); // one day, two hours
+ * cTime meetingTime = time + span;
+ * \endcode
+ *
+ * \subsection SECTION_TIME_CAL Calendrical time representation with integrated time zone, thus integrated 'datetime' functionality
+ *
+ * \code
+ * stCalendar calendar = meetingTime.calendar();
+ * int day = calendar.day;
+ * int zone = calendar.timeZone.hours;
+ * \endcode
+ *
+ * \subsection SECTION_TIME_STRING Biunique string operations for printing and parsing (including time zone parsing and language support)
+ *
+ * \code
+ * string timeText = meetingTime.toString();
+ * cTime time = cTime::set("2020-03-15 15:30:10 CET")
+ * \endcode
+ *
+ * \section SECTION_TIME_INSTALLATION Installation
+ *
+ * Add the following foulders and included files provided within the 'src' foulder to your C++ project.\n
+ *
+ * \code
+ *  #include "LibCpp/Time/cTime.h"
+ *  #include "LibOb/CppCommon/Time/LibOb_strptime.h"
+ *  #include "LibOb/CppCommon/Language/Language.h"
+ * \endcode
+ *
+ * LibCpp/Time/cTime.cpp\n
+ * LibOb/Common/Time/LibOb_strptime.c\n
+ * LibOb/Common/Language/Language.c and Language.h\n
+ * \n
+ * A sample main.cpp to build a demonstration project is also supplied:\n
+ * \n
+ *
+ * \section SECTION_TIME_DESCRIPTION Description and examples for the 'cTime' class
+ *
+ * \subsection SECTION_TIME_MOTIVATIOM Motivation of class development
+ *
+ * Time operations are a standard task for programmers but even after over 50 years of electronic data processing,
+ * the provided functions of programming languages like C/C++ are still unhandily.\n
+ * For example the 'struct tm' used for calendrical time representation lacks an entry for the time zone
+ * and the string to time conversion function 'strptime' lacks time zone parsing on Linux and is
+ * even not existing on Windows.\n
+ * This situaton was incredibly for me, especially because I (and other programmers) even couldn't find satisfying solutions on open source
+ * publications.\n
+ * <a href="https://stackoverflow.com/questions/1650715/is-there-a-standard-date-time-class-in-c">Time class c++ discussion on Stack Overflow</a>\n
+ * The lack of 'strptime' on Windows is discussed on\n
+ * <a href="https://stackoverflow.com/questions/321849/strptime-equivalent-on-windows">'strptime' for Windows discussion on Stack Overflow</a>\n
+ * and a (by far best but still not optimal) solution including parsable time zones is published by P.J. Miller on github.\n
+ * <a href="https://github.com/p-j-miller/date-time">'strptime' for Windows by J.P. Miller</a>\n
+ * Alltogether this motivated me to develop and publish the 'cTime' class including a portable 'strptime' implementation.
+ *
+ *
+ * \subsection SECTION_TIME_USAGE Usage of the 'cTime' class
  *
  * This code provides the class 'cTime' within the namespace 'LibCpp'. This class simplifies the
  * usage of date and time compared to the functions defined in 'time.h' and is based on those
@@ -58,14 +121,17 @@
  *     // Calendar  is: 2023-09-20#17:17:38#DST#+01:00
  * }
  * \endcode
- * The calendar is denoted in the 'Geographic Zone Calendar (GZC) string'.\n
+ * The calendar is denoted in the 'Geographic Zone Calendar (\anchor GZC GZC) string'.\n
  * The term 'DST' means daylight saving time (dst). Possibly the term 'STD' for standard time appears.
  * In both cases '+01:00' stands for the geographic time zone the calendar data is given for.
  * It is important to distinguish between the geographic time zone and the relative deviation
  * of the given time to the Coordinated Universal Time (UTC) (same as Greenwich Mean Time (GMT)).\n
  * It is a deliberate decision not to use the ISO8601 time format for the calendar string. The
  * reason is the lack of ability to express the dst which is of importance for a meaningful understanding
- * of the date and time imformation. (C++ decided the same within the 'struct tm' within 'time.h'.)\n
+ * of the date and time imformation. (E.g. birth certificates carry this information (at least if it is
+ * necessary and C++ decided the same within the 'struct tm' within 'time.h'.) The most
+ * obvious reason is the ambigious time during the hour of turning back the clock at the change from dst
+ * to standard time. To distinguish between those two hours the dst information is necessary.\n
  * To receive the relative deviation (or UTC time offset), which is indicated by the dst value of -1
  * within the stCalendar struct, you can call:
  * \code
@@ -123,13 +189,16 @@
  * For further available methods refer to \ref cTime.h.
 **/
 
-#if defined(LibCpp_Y2038) || defined(LibCpp_Y2038TEST)
-    #include "CalendarToTime.h"
-#else
-    #include "cTime.h"
-#endif
+//#if defined(LibCpp_Y2038) || defined(LibCpp_Y2038TEST)
+//    #include "CalendarToTime.h"
+//#else
+//    #include "cTime.h"
+//#endif
+
+#include "cTime.h"
 
 #define LibCpp_SECONDSPERHOUR 3600  ///< Konstante
+#define LibCpp_SECONDSPERMINUTE 60  ///< Konstante
 
 //! @cond Doxygen_Suppress
 #define __STDC_LIB_EXT1__
@@ -139,14 +208,14 @@
 #include <cstring>
 
 using namespace LibCpp;
+using namespace std;
 
 int8_t LibCpp::int8Zero = 0;        ///< Value of zero to let cTime::UTC point to.
 int8_t LibCpp::int8_0x80 = 0x80;    ///< Value of 0x80 to let cTime::UTCdeviation point to.
-const tm_t LibCpp::tm_Ini = {0, 0, 0, 0, 0, 0, 0, 0, 0};  ///< Initializer for struct tm variables. The order of elements is undefined, thus tm_isdst cannot be initialized to -1
-const stCalendar LibCpp::stCalendar_Ini = {0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0}; ///< Initializer for stCalendar variables.
+const stCalendar LibCpp::stCalendar_Ini = {0, 0, 0, 0, 0, 0, 0, {0, 0}, 0, 0, 0, 0, 0, 0, 0}; ///< Initializer for stCalendar variables setting all entries to zero
+const stCalendar LibCpp::stCalendar_IniUnix = {1970, 1, 1, 0, 0, 0, 0, {0, 0}, 0, 0, 0, 0, 0, 0, 0}; ///< Initializer for stCalendar variables which will be converted to unix time 0
+const stCalendar LibCpp::stCalendar_Invalid = {INT32_INVALID, UINT8_INVALID, UINT8_INVALID, UINT8_INVALID, UINT8_INVALID, UINT8_INVALID, INT8_INVALID, {INT8_INVALID, 0}, 0, UINT16_INVALID, UINT8_INVALID, UINT8_INVALID, UINT8_INVALID, INT8_INVALID, INT16_INVALID}; ///< stCalendar_Invalid
 const stDuration LibCpp::stDuration_Ini = {0, 0, 0, 0, 1};          ///< Initializer for stDuration
-const char LibCpp::dstString[3][4] = {"UTC", "STD", "DST"};         ///< String representation for dst
-const char* LibCpp::weekdays[8] = {"", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};  ///< String representation for weekdays                                          ///< String representations for weekdays
 
 /**
  * @brief Constructor
@@ -196,10 +265,10 @@ cTime cTime::set(stCalendar calendar)
     tmCalendar.tm_sec   = calendar.second;
     tmCalendar.tm_isdst = calendar.dst;
     time_t timeValue = mktime(&tmCalendar);
-    int8_t localZone = localTimeZone();
+    stTimeZone localZone = localTimeZone();
     int dst = 0;
     if (tmCalendar.tm_isdst) dst=1;
-    timeValue += (localZone + dst + calendar.timeZone) * LibCpp_SECONDSPERHOUR;
+    timeValue += (localZone.hours + dst + calendar.timeZone.hours) * LibCpp_SECONDSPERHOUR + calendar.timeZone.minutes * LibCpp_SECONDSPERMINUTE;
     return set(timeValue);
 }
 
@@ -228,7 +297,7 @@ cTime cTime::set(stDuration duration)
  */
 cTime cTime::set(int32_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second)
 {
-    stCalendar calendar = getCalendar(year, month, day, hour, minute, second);
+    stCalendar calendar = setCalendar(year, month, day, hour, minute, second);
     return cTime::set(calendar);
 }
 
@@ -254,20 +323,21 @@ cTime cTime::set(uint64_t days, uint64_t hours, uint64_t minutes, uint64_t secon
 
 /**
  * @brief Deliveres a cTime instance initialized by a string representing either a calendar or a duration string.
- * @param text
+ * @param dateString
+ * @param format
  * @return Created instance
  */
-cTime cTime::set(std::string text)
+cTime cTime::set(std::string dateString, std::string format)
 {
-  if (text[0] == 'D')
+  if (dateString[0] == 'D')
   {
-      stDuration duration = cTime::fromDurationString(text);
-      return cTime::set(duration);
+      stDuration duration = fromDurationString(dateString);
+      return set(duration);
   }
   else
   {
-      stCalendar calendar = cTime::fromString(text);
-      return cTime::set(calendar);
+      stCalendar calendar = fromString(dateString, format);
+      return set(calendar);
   }
 }
 
@@ -294,7 +364,7 @@ time_t cTime::time()
 stCalendar cTime::calendar(int8_t* pRequestedTimeZone)
 {
     struct tm lt = tm_Ini;
-    int8_t zone = localTimeZone();
+    int8_t zone = localTimeZone().hours;
     localtime_s(&lt, &_time);
 
     stCalendar calendar = stCalendar_Ini;
@@ -306,7 +376,7 @@ stCalendar cTime::calendar(int8_t* pRequestedTimeZone)
             relZone += 1;
 
         int8_t relDestZone;
-        if (*pRequestedTimeZone == (int8_t)0x80)
+        if (*pRequestedTimeZone == INT8_INVALID)
         {
             relDestZone = zone;
             if (lt.tm_isdst > 0) relDestZone++;
@@ -316,10 +386,10 @@ stCalendar cTime::calendar(int8_t* pRequestedTimeZone)
         lt.tm_hour += relDestZone - relZone;
         mktime(&lt);
         lt.tm_isdst = -1;
-        calendar.timeZone = relDestZone;
+        calendar.timeZone.hours = relDestZone;
     }
     else
-        calendar.timeZone = zone;
+        calendar.timeZone.hours = zone;
 
     calendar.second    = lt.tm_sec;         // seconds after the minute	0-60*
     calendar.minute    = lt.tm_min;         // minutes after the hour	0-59
@@ -368,7 +438,7 @@ stDuration cTime::duration()
  * @param second
  * @return Created calendar struct
  */
-stCalendar cTime::getCalendar(int32_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second)
+stCalendar cTime::setCalendar(int32_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second)
 {
     stCalendar calendar = stCalendar_Ini;
 
@@ -381,7 +451,7 @@ stCalendar cTime::getCalendar(int32_t year, uint8_t month, uint8_t day, uint8_t 
     tmCalendar.tm_sec   = second;
     tmCalendar.tm_isdst = -1;
     mktime(&tmCalendar);    // generates tm_isdst
-    int8_t localZone = localTimeZone();
+    stTimeZone localZone = localTimeZone();
     calendar.dst      = tmCalendar.tm_isdst;
     calendar.timeZone = localZone;
     calendar.year     = year;
@@ -397,78 +467,47 @@ stCalendar cTime::getCalendar(int32_t year, uint8_t month, uint8_t day, uint8_t 
 }
 
 /**
- * @brief Returns the local time zone according to system clock settings
+ * @brief Returns the local time zone and dst information (if pointer is set) according to system clock settings.
+ * In case dst is unknown (dst=-1) the time zone is the UTC time offset.
+ * @param pDst Pointer to dst value [output]
  * @return Geographic time zone.
  */
-int8_t cTime::localTimeZone()
+stTimeZone cTime::localTimeZone(int8_t* pDst)
 {
-    time_t time = ::time(nullptr);
-    struct tm gt = tm_Ini;
-    struct tm lt = tm_Ini;
-    gt.tm_isdst = 0;
-    lt.tm_isdst = -1;
-    gmtime_s(&gt, &time);
-    localtime_s(&lt, &time);
-    time_t gtm = mktime(&gt);
-    time_t ltm = mktime(&lt);
-    int8_t zone = (uint8_t)(((ltm-gtm)+LibCpp_SECONDSPERHOUR/2) / LibCpp_SECONDSPERHOUR);
-    if (gt.tm_isdst>0) zone -= 1;
-    if (lt.tm_isdst>0) zone += 1;
-    return zone;
+    return LibOb_localTimeZone(pDst);
 }
 
 /**
- * @brief Calculates the relative deviation of UTC (GMT) time.
- * @param calendar
+ * @brief Calculates the relative deviation from UTC (GMT) time.
+ * @param zone
+ * @param dst
  * @return
  */
-int8_t cTime::UTCdeviation(stCalendar calendar)
+stTimeZone cTime::UTCdeviation(stTimeZone zone, int8_t dst)
 {
-    int8_t result = calendar.timeZone;
-    if (calendar.dst > 0 ) result++;
+    stTimeZone result = zone;
+    if (dst > 0 ) result.hours++;
     return result;
 }
 
 /**
- * @brief Delivers a calendar struct from a GZC string
- * @param dateString string
+ * @brief Delivers a calendar struct from a \ref GZC formatted string.
+ * @param dateString Input date string.
+ * @param format Format string.
  * @return
  */
-stCalendar cTime::fromString(std::string dateString)
+stCalendar cTime::fromString(std::string dateString, std::string format)
 {
-    stCalendar calendar = stCalendar_Ini;
-    if (dateString[0] == 'D') return calendar;
-    int year = 0;
-    int month = 0;
-    int day = 0;
-    int hour = 0;
-    int minute = 0;
-    int second = 0;
-    char dst[4];
-    int zone = 0;
-    sscanf_s(dateString.c_str(), "%d-%d-%d#%d:%d:%d#%3*s#%d:00", &year, &month, &day, &hour, &minute, &second, &zone);
-    dst[0] = dateString.c_str()[20];
-    dst[1] = dateString.c_str()[21];
-    dst[2] = dateString.c_str()[22];
-    dst[3] = 0;
-    if (strcmp(dst, "STD") == 0)
-        calendar.dst = 0;
-    if (strcmp(dst, "DST") == 0)
-        calendar.dst = 1;
-    else
-        calendar.dst = -1;
-    calendar.year = (int32_t)year;
-    calendar.month = (uint8_t)month;
-    calendar.day = (uint8_t)day;
-    calendar.hour = (uint8_t)hour;
-    calendar.minute = (uint8_t)minute;
-    calendar.second = (uint8_t)second;
-    calendar.timeZone = (int8_t)zone;
-    return calendar;
+    struct tm tmCal = tm_Invalid;
+    stTimeZone zone = stTimeZone_Invalid;
+
+    if (dateString[0] == 'D') return stCalendar_Invalid;
+    LibOb_strptime(dateString.c_str(), format.c_str(), &tmCal, &zone);
+    return toCalendar(tmCal, &zone);
 }
 
 /**
- * @brief Delivers a duration struct from a GZC string
+ * @brief Delivers a duration struct from a \ref GZC formatted string
  * A sample string is: D95#00:42:22
  * @param durationString
  * @return
@@ -498,13 +537,15 @@ stDuration cTime::fromDurationString(std::string durationString)
 /**
  * @brief Returns a string interpretation of the 'calendar' method result
  * See /ref calendar .
+ * @param format
+ * @param pLanguage
  * @param pRequestedTimeZone
  * @return
  */
-std::string cTime::toString(int8_t* pRequestedTimeZone)
+std::string cTime::toString(std::string format, enLanguage* pLanguage, int8_t* pRequestedTimeZone)
 {
     stCalendar cal = calendar(pRequestedTimeZone);
-    return cTime::toString(cal);
+    return cTime::toString(cal, format, pLanguage);
 }
 
 /**
@@ -518,36 +559,146 @@ std::string cTime::toDurationString()
 }
 
 /**
- * @brief Generates a GZC string from a calendar struct
+ * @brief Generates a \ref GZC formatted string from a calendar struct
  * @param calendar
+ * @param format
+ * @param pLanguage
  * @return
  */
-std::string cTime::toString(stCalendar calendar)
+std::string cTime::toString(stCalendar calendar, std::string format, enLanguage* pLanguage)
 {
-    std::string str;
-    char buffer[32];
-    int index = calendar.dst + 1;
-    if (index<0 || index>2) index = 0;
-
-    sprintf_s(buffer, 32, "%04d-%02d-%02d#%02d:%02d:%02d#%s#%+03d:00", (int)calendar.year, (int)calendar.month, (int)calendar.day, (int)calendar.hour, (int)calendar.minute, (int)calendar.second, dstString[index], (int)calendar.timeZone);
-    std::string result(buffer);
+    char buffer[64];
+    stTimeZone zone;
+    struct tm t = cTime::fromCalendar(calendar, &zone);
+    if (format=="") format = "%Y-%m-%d#%H:%M:%S#%U#%z";
+    LibOb_strftime(buffer, 64, format.c_str(), &t, &zone, pLanguage);
+    string result(buffer);
     return result;
 }
 
 /**
- * @brief Generates a GZC string from a duration struct
+ * @brief Generates a \ref GZC formatted string from a duration struct
  * @param duration
  * @return
  */
 std::string cTime::toString(stDuration duration)
 {
-    std::string str;
+    string str;
     char buffer[32];
     int days = (int)duration.days;
     if (duration.sign < 0) days = -days;
     sprintf_s(buffer, 32, "D%d#%02d:%02d:%02d", days, (int)duration.hours, (int)duration.minutes, (int)duration.seconds);
-    std::string result(buffer);
+    string result(buffer);
     return result;
+}
+
+/**
+ * @brief Converts a stCalendar to a struct tm
+ * If a pointer to a time zone is given, the time zone is also extracted.
+ * @param calendar
+ * @param pTimeZone
+ * @return
+ */
+struct tm cTime::fromCalendar(stCalendar calendar, stTimeZone* pTimeZone)
+{
+    struct tm tmCalendar = tm_Invalid;
+    if (calendar.year != INT32_INVALID)
+        tmCalendar.tm_year  = calendar.year - 1900;
+    if (calendar.month != UINT8_INVALID)
+        tmCalendar.tm_mon   = calendar.month - 1;
+    if (calendar.day != UINT8_INVALID)
+        tmCalendar.tm_mday  = calendar.day;
+    if (calendar.hour != UINT8_INVALID)
+        tmCalendar.tm_hour  = calendar.hour;
+    if (calendar.minute != UINT8_INVALID)
+        tmCalendar.tm_min   = calendar.minute;
+    if (calendar.second != UINT8_INVALID)
+        tmCalendar.tm_sec   = calendar.second;
+    if (calendar.dst != INT8_INVALID)
+        tmCalendar.tm_isdst = calendar.dst;
+    if (calendar.dayInWeek != UINT8_INVALID)
+    {
+        tmCalendar.tm_wday  = calendar.dayInWeek;
+        if (tmCalendar.tm_wday == 7) tmCalendar.tm_wday = 0;
+    }
+    if (calendar.dayInYear != UINT16_INVALID)
+        tmCalendar.tm_yday  = calendar.dayInYear - 1;
+    if (pTimeZone)
+    {
+        if (calendar.year != INT8_INVALID)
+            *pTimeZone = calendar.timeZone;
+    }
+    return tmCalendar;
+}
+
+/**
+ * @brief Converts a struct tm to a BibCpp::stCalendar .
+ * If no pointer to time zone is specified (standard), dst is set according to the local system clock settings.
+ * Entities of stCalendar not available in struct tm are left to initial values.
+ * @param tmCalendar
+ * @param pTimeZone
+ * @return
+ */
+stCalendar cTime::toCalendar(struct tm tmCalendar, const stTimeZone* pTimeZone)
+{
+    stCalendar calendar = stCalendar_Invalid;
+    if (tmCalendar.tm_year != INT_INVALID)
+        calendar.year = tmCalendar.tm_year + 1900;
+    if (tmCalendar.tm_mon != INT_INVALID)
+        calendar.month = tmCalendar.tm_mon + 1;
+    if (tmCalendar.tm_mday != INT_INVALID)
+        calendar.day = tmCalendar.tm_mday;
+    if (tmCalendar.tm_hour != INT_INVALID)
+        calendar.hour = tmCalendar.tm_hour;
+    if (tmCalendar.tm_min != INT_INVALID)
+        calendar.minute = tmCalendar.tm_min;
+    if (tmCalendar.tm_sec != INT_INVALID)
+        calendar.second = tmCalendar.tm_sec;
+    if (tmCalendar.tm_isdst != INT_INVALID)
+        calendar.dst = tmCalendar.tm_isdst;
+    if (tmCalendar.tm_wday != INT_INVALID)
+    {
+        calendar.dayInWeek = tmCalendar.tm_wday;
+        if (!calendar.dayInWeek) calendar.dayInWeek = 7;
+    }
+    if (tmCalendar.tm_year != INT_INVALID)
+        calendar.dayInYear = tmCalendar.tm_yday + 1;
+    if (pTimeZone)
+    {
+        if (pTimeZone->hours != INT8_INVALID)
+            calendar.timeZone = *pTimeZone;
+    }
+    else
+    {
+        calendar.timeZone = cTime::localTimeZone(&calendar.dst);
+    }
+    return calendar;
+}
+
+/**
+ * @brief operator <<
+ * @param out Output stream.
+ * @param t cTime instance to be streamed as text representation.
+ * @return
+ */
+std::ostream & operator << (std::ostream &out, cTime &t)
+{
+    out << t.toString();
+    return out;
+}
+
+/**
+ * @brief operator >>
+ * @param in Input stream.
+ * @param t
+ * @return
+ */
+std::istream & operator >> (std::istream &in, cTime &t)
+{
+    string s;
+    in >> s;
+    t = cTime::set(s);
+    return in;
 }
 
 /** @} */
